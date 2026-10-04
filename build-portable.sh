@@ -4,7 +4,7 @@
 set -euo pipefail
 
 if [[ "$(id -u)" -eq 0 ]]; then
-  echo "Run ./build-portable.sh without sudo. The script will request sudo only when needed." >&2
+  echo "Run ./build-portable.sh without sudo." >&2
   exit 1
 fi
 
@@ -15,11 +15,18 @@ BUILD_DIR="$SCRIPT_DIR/build"
 QMAKE="${QMAKE:-$HOME/.Qt/6.11.1/gcc_64/bin/qmake}"
 QT_PLUGINS_DIR="$("$QMAKE" -query QT_INSTALL_PLUGINS)"
 DOCKER_OUT="$(mktemp -d "${TMPDIR:-/tmp}/magicpodscore-runtime.XXXXXX")"
-OWNER_USER="$(id -un)"
-OWNER_GROUP="$(id -gn)"
+# Use docker directly when the user can reach the daemon (member of the
+# "docker" group); fall back to sudo otherwise.
+if docker info >/dev/null 2>&1; then
+  DOCKER=(docker)
+else
+  echo "==> No access to the docker daemon; using sudo (or: sudo usermod -aG docker \$USER, then re-login)"
+  sudo -v
+  DOCKER=(sudo docker)
+fi
 
 cleanup() {
-  rm -rf "$DOCKER_OUT" 2>/dev/null || sudo rm -rf "$DOCKER_OUT"
+  rm -rf "$DOCKER_OUT" 2>/dev/null || sudo rm -rf "$DOCKER_OUT" # root-owned if built via sudo docker
 }
 trap cleanup EXIT
 
@@ -53,13 +60,11 @@ cqtdeployer \
 
 [[ -f "$QT_PLUGINS_DIR/platforms/libqwayland.so" ]] || { echo "ERROR: libqwayland.so not found in $QT_PLUGINS_DIR" >&2; exit 1; }
 cp "$QT_PLUGINS_DIR/platforms/libqwayland.so" "$TARGET_DIR/plugins/platforms/"
+grep -q '^export CQT_RUN_FILE=' "$TARGET_DIR/magicpods.sh" || { echo "ERROR: CQT_RUN_FILE line missing in magicpods.sh (cqtdeployer output changed)" >&2; exit 1; }
 sed -i '/^export CQT_RUN_FILE=/a export MAGICPODSCORE_LIBDIR="$BASE_DIR"/bin/modules/lib' "$TARGET_DIR/magicpods.sh"
 
-echo "==> Requesting sudo for backend runtime steps"
-sudo -v
-
 echo "==> Building MagicPodsCore runtime with Docker"
-sudo docker buildx build \
+"${DOCKER[@]}" buildx build \
   -f "$SCRIPT_DIR/Dockerfile.magicpodscore" \
   --target runtime_export_stage \
   -o type=local,dest="$DOCKER_OUT" \
@@ -73,14 +78,14 @@ if [[ ! -f "$DOCKER_OUT/bin/modules/magicpodscore" ]]; then
   exit 1
 fi
 
-sudo cp -f "$DOCKER_OUT/bin/modules/magicpodscore" "$TARGET_DIR/bin/modules/magicpodscore"
+cp -f "$DOCKER_OUT/bin/modules/magicpodscore" "$TARGET_DIR/bin/modules/magicpodscore"
 
 if [[ -d "$DOCKER_OUT/lib" ]]; then
-  sudo cp -a "$DOCKER_OUT/lib/." "$TARGET_DIR/bin/modules/lib/"
+  cp -a "$DOCKER_OUT/lib/." "$TARGET_DIR/bin/modules/lib/"
 fi
 
-echo "==> Fixing ownership for $TARGET_DIR ($OWNER_USER:$OWNER_GROUP)"
-sudo chown -R "$OWNER_USER:$OWNER_GROUP" "$TARGET_DIR"
+# Files exported by "sudo docker" are root-owned; hand them back to the user.
+[[ "${DOCKER[0]}" == sudo ]] && sudo chown -R "$(id -u):$(id -g)" "$TARGET_DIR"
 
 # Install icons inside the bundle (collect logos from QML assets)
 ICON_IMAGES_DIR="$SCRIPT_DIR/src/app/qml/assets/images"

@@ -201,7 +201,8 @@ int main(int argc, char *argv[]) {
     root = engine.rootObjects().constFirst();
 
     // If requested to start in tray, do not show the main window on startup.
-    if (startInTray) {
+    // Without a tray the window would be unreachable, so keep it visible then.
+    if (startInTray && QSystemTrayIcon::isSystemTrayAvailable()) {
         if (auto window = qobject_cast<QWindow *>(root)) {
             window->hide();
         } else {
