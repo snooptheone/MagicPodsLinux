@@ -52,6 +52,17 @@ int main(int argc, char *argv[]) {
 
     QApplication app(argc, argv);
 
+    // Parse a simple CLI flag to start the application directly in the tray
+    // Supported flags: --start-in-tray, --start-minimized, --minimized
+    bool startInTray = false;
+    const QStringList cliArgs = QCoreApplication::arguments();
+    for (const QString &a : cliArgs) {
+        if (a == QLatin1String("--start-in-tray") || a == QLatin1String("--start-minimized") || a == QLatin1String("--minimized")) {
+            startInTray = true;
+            break;
+        }
+    }
+
     QFontDatabase::addApplicationFont(":/fonts/NotoSans-Thin.ttf");
     QFontDatabase::addApplicationFont(":/fonts/NotoSans-ThinItalic.ttf");
     QFontDatabase::addApplicationFont(":/fonts/NotoSans-ExtraLight.ttf");
@@ -188,7 +199,17 @@ int main(int argc, char *argv[]) {
     }
 
     root = engine.rootObjects().constFirst();
-    if (raisePending) {
+
+    // If requested to start in tray, do not show the main window on startup.
+    if (startInTray) {
+        if (auto window = qobject_cast<QWindow *>(root)) {
+            window->hide();
+        } else {
+            root->setProperty("visible", false);
+        }
+    }
+
+    if (raisePending && !startInTray) {
         raiseWindow();
     }
 
