@@ -16,7 +16,7 @@ while [[ $# -gt 0 ]]; do
       cat <<EOF
 Usage: uninstall.sh [--keep-autostart] [--purge]
 
-  --keep-autostart  Keep ~/.config/autostart/magicpods.desktop.
+  --keep-autostart  Keep the autostart entry (app.magicpods.desktop).
   --purge           Also delete the build output $BUNDLE_DIR.
 EOF
       exit 0
@@ -27,9 +27,11 @@ EOF
 done
 
 # remove <path> [sudo]: delete if present, with sudo only when asked.
+REMOVED=0
 remove() {
   [[ -e "$1" || -L "$1" ]] || return 0
   echo "Removing $1"
+  REMOVED=$((REMOVED + 1))
   if [[ "${2:-}" == sudo ]]; then sudo rm -rf "$1"; else rm -rf "$1"; fi
 }
 
@@ -38,11 +40,13 @@ echo "==> Uninstalling MagicPods"
 # User install
 remove "$HOME/.local/share/magicpods"
 remove "$HOME/.local/bin/magicpods"
-remove "$HOME/.local/share/applications/magicpods.desktop"
+remove "$HOME/.local/share/applications/app.magicpods.desktop"
+remove "$HOME/.local/share/applications/magicpods.desktop" # older installs
 
 # System install (only touches sudo if something is there)
 remove /opt/magicpods sudo
-remove /usr/share/applications/magicpods.desktop sudo
+remove /usr/share/applications/app.magicpods.desktop sudo
+remove /usr/share/applications/magicpods.desktop sudo # older installs
 
 # /usr/local/bin/magicpods: system install, or an old one pointing at the repo bundle
 LINK=/usr/local/bin/magicpods
@@ -59,17 +63,23 @@ fi
 for base in "$HOME/.local/share/icons/hicolor" /usr/share/icons/hicolor; do
   [[ -d "$base" ]] || continue
   s=""; [[ "$base" == /usr/* ]] && s=sudo
+  before=$REMOVED
   for f in "$base"/*/apps/magicpods.png; do remove "$f" $s; done
   for svg in "$SCRIPT_DIR"/src/app/qml/assets/icons/*.svg; do
     remove "$base/scalable/apps/$(basename "$svg")" $s
   done
+  # Refresh the cache (and ask for sudo) only if something was removed here.
+  (( REMOVED > before )) || continue
   if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     if [[ -n "$s" ]]; then sudo gtk-update-icon-cache -f -t "$base" || true
     else gtk-update-icon-cache -f -t "$base" || true; fi
   fi
 done
 
-[[ $KEEP_AUTOSTART -eq 1 ]] || remove "$HOME/.config/autostart/magicpods.desktop"
+if [[ $KEEP_AUTOSTART -eq 0 ]]; then
+  remove "$HOME/.config/autostart/app.magicpods.desktop"
+  remove "$HOME/.config/autostart/magicpods.desktop" # written by older installs
+fi
 [[ $PURGE -eq 0 ]] || remove "$BUNDLE_DIR"
 
 echo "Uninstall complete."

@@ -29,20 +29,29 @@ QQC2.Page {
     property var data: infoData
     readonly property var capabilities: data?.capabilities ?? null
     readonly property var ancData: capabilities?.anc ?? null
+    readonly property var highResolutionMicrophoneData: capabilities?.highResolutionMicrophone ?? null
+    readonly property var bluetoothCodec: capabilities?.bluetoothCodec ?? null
+    readonly property var earDetectionData: capabilities?.earDetection ?? null
     readonly property var conversationAwarenessData: capabilities?.conversationAwareness ?? null
     readonly property var personalizedVolumeData: capabilities?.personalizedVolume ?? null
-    readonly property var ancOneAirPodData: capabilities?.ancOneAirPod ?? null
-    readonly property var volumeSwipeData: capabilities?.volumeSwipe ?? null
+    readonly property var digitalCrownData: capabilities?.digitalCrown ?? null
+    readonly property var pressAndHoldAirPodModeData: capabilities?.pressAndHoldAirPodMode ?? null
+    readonly property var pressAndHoldAirPodModeAncData: capabilities?.pressAndHoldAirPodModeAnc ?? null
     readonly property var adaptiveAudioNoiseData: capabilities?.adaptiveAudioNoise ?? null
-    readonly property var pressAndHoldDurationData: capabilities?.pressAndHoldDuration ?? null
+    readonly property var ancOneAirPodData: capabilities?.ancOneAirPod ?? null
+    readonly property var ancOffModeData: capabilities?.ancOffMode ?? null
+    readonly property var customEqData: capabilities?.customEq ?? null
     readonly property var pressSpeedData: capabilities?.pressSpeed ?? null
-    readonly property var toneVolumeData: capabilities?.toneVolume ?? null
+    readonly property var pressAndHoldDurationData: capabilities?.pressAndHoldDuration ?? null
+    readonly property var volumeSwipeData: capabilities?.volumeSwipe ?? null
     readonly property var volumeSwipeLengthData: capabilities?.volumeSwipeLength ?? null
     readonly property var endCallData: capabilities?.endCall ?? null
-    readonly property var bluetoothCodec: capabilities?.bluetoothCodec ?? null
+    readonly property var toneVolumeData: capabilities?.toneVolume ?? null
+    readonly property var sleepDetectionData: capabilities?.sleepDetection ?? null
+    readonly property var optimizedChargeData: capabilities?.optimizedCharge ?? null
     readonly property int mWidth: MP.Units.gridUnit * 12
 
-    readonly property bool hasCapabilities: !!capabilities && [ancData, conversationAwarenessData, personalizedVolumeData, ancOneAirPodData, volumeSwipeData, adaptiveAudioNoiseData, pressAndHoldDurationData, pressSpeedData, toneVolumeData, volumeSwipeLengthData, endCallData, bluetoothCodec].some(function (v) {
+    readonly property bool hasCapabilities: !!capabilities && [ancData, highResolutionMicrophoneData, bluetoothCodec, earDetectionData, conversationAwarenessData, personalizedVolumeData, digitalCrownData, pressAndHoldAirPodModeData, pressAndHoldAirPodModeAncData, adaptiveAudioNoiseData, ancOneAirPodData, ancOffModeData, customEqData, pressSpeedData, pressAndHoldDurationData, volumeSwipeData, volumeSwipeLengthData, endCallData, toneVolumeData, sleepDetectionData, optimizedChargeData].some(function (v) {
         return v !== null;
     })
 
@@ -56,10 +65,109 @@ QQC2.Page {
         return infoData?.address;
     }
 
+    // Preserve integer capability values when QML converts them to QVariant.
+    function toInteger(value) {
+        return Math.round(value) | 0;
+    }
+
+    function volumeReductionLabel(value) {
+        const roundedValue = toInteger(value);
+        return roundedValue === 0 ? qsTrId("battery.volume_reduction.off") : roundedValue + "%";
+    }
+
+    function setEarDetectionField(field, value) {
+        if (!earDetectionData) {
+            return;
+        }
+
+        var selected = earDetectionData.selected || {};
+        selected[field] = value;
+        earDetectionData.selected = selected;
+
+        cppBackend.setCapability("earDetection", currentAddress(), {
+            pauseMedia: selected.pauseMedia ?? false,
+            switchToSpeakers: selected.switchToSpeakers ?? false,
+            lowerVolume: toInteger(selected.lowerVolume ?? 0)
+        });
+    }
+
+    function setConversationAwarenessField(field, value) {
+        if (!conversationAwarenessData) {
+            return;
+        }
+
+        var selected = conversationAwarenessData.selected || {};
+        selected[field] = value;
+        conversationAwarenessData.selected = selected;
+
+        cppBackend.setCapability("conversationAwareness", currentAddress(), {
+            enabled: selected.enabled ?? false,
+            volume: toInteger(selected.volume ?? 0)
+        });
+    }
+
     function requestInfo() {
         if (cppBackend && cppBackend.connected) {
             cppBackend.getInfo();
         }
+    }
+
+    function pressAndHoldModeLabel(value) {
+        switch (value) {
+        case 1:
+            return qsTrId("battery.press_and_hold_mode.voice_assistant");
+        case 5:
+            return qsTrId("battery.press_and_hold_mode.noise_control");
+        case 6:
+            return qsTrId("battery.press_and_hold_mode.volume_up");
+        case 7:
+            return qsTrId("battery.press_and_hold_mode.volume_down");
+        default:
+            return String(value);
+        }
+    }
+
+    function setPressAndHoldMode(side, value) {
+        if (!pressAndHoldAirPodModeData) {
+            return;
+        }
+
+        var selected = pressAndHoldAirPodModeData.selected || {};
+        selected[side] = value;
+        pressAndHoldAirPodModeData.selected = selected;
+
+        var update = {};
+        update[side] = value;
+        cppBackend.setCapability("pressAndHoldAirPodMode", currentAddress(), update);
+    }
+
+    function customEqValue(field) {
+        const selected = customEqData?.selected;
+        return selected && selected[field] !== undefined ? selected[field] : 50;
+    }
+
+    function setCustomEqField(field, value) {
+        if (!customEqData) {
+            return;
+        }
+
+        var selected = customEqData.selected || {};
+        selected[field] = value;
+        customEqData.selected = selected;
+    }
+
+    function sendCustomEq() {
+        if (!customEqData) {
+            return;
+        }
+
+        const selected = customEqData.selected || {};
+        cppBackend.setCapability("customEq", currentAddress(), {
+            enabled: selected.enabled ?? false,
+            low: toInteger(selected.low ?? 50),
+            mid: toInteger(selected.mid ?? 50),
+            high: toInteger(selected.high ?? 50)
+        });
     }
 
     Connections {
@@ -355,6 +463,24 @@ QQC2.Page {
 
                 MP.FormRow {
                     Layout.fillWidth: true
+                    visible: rootPage.highResolutionMicrophoneData !== null
+                    label: qsTrId("battery.high_resolution_microphone")
+                    tooltip: qsTrId("battery.high_resolution_microphone.description")
+
+                    QQC2.Switch {
+                        checked: rootPage.highResolutionMicrophoneData?.selected ?? false
+                        enabled: !(rootPage.highResolutionMicrophoneData?.readonly ?? true)
+                        onToggled: {
+                            if (rootPage.highResolutionMicrophoneData) {
+                                rootPage.highResolutionMicrophoneData.selected = checked;
+                                cppBackend.setCapability("highResolutionMicrophone", rootPage.currentAddress(), checked);
+                            }
+                        }
+                    }
+                }
+
+                MP.FormRow {
+                    Layout.fillWidth: true
                     visible: rootPage.bluetoothCodec !== null
                     label: qsTrId("battery.bluetooth_codec")
                     tooltip: {
@@ -397,17 +523,110 @@ QQC2.Page {
 
                 MP.FormRow {
                     Layout.fillWidth: true
+                    visible: rootPage.earDetectionData !== null
+                    label: qsTrId("battery.ear_detection.pause_media")
+
+                    QQC2.Switch {
+                        checked: rootPage.earDetectionData?.selected?.pauseMedia ?? false
+                        enabled: !(rootPage.earDetectionData?.readonly ?? true)
+                        onToggled: rootPage.setEarDetectionField("pauseMedia", checked)
+                    }
+                }
+
+                MP.FormRow {
+                    Layout.fillWidth: true
+                    visible: rootPage.earDetectionData !== null
+                    label: qsTrId("battery.ear_detection.lower_volume")
+
+                    RowLayout {
+                        spacing: MP.Units.largeSpacing
+
+                        QQC2.Slider {
+                            id: earDetectionVolumeSlider
+                            Layout.leftMargin: -16
+                            Layout.rightMargin: -16
+                            implicitWidth: rootPage.mWidth + 32
+                            from: 0
+                            to: 100
+                            value: rootPage.earDetectionData?.selected?.lowerVolume ?? 0
+                            enabled: !(rootPage.earDetectionData?.readonly ?? true)
+                            onMoved: {
+                                if (rootPage.earDetectionData) {
+                                    var selected = rootPage.earDetectionData.selected || {};
+                                    selected.lowerVolume = rootPage.toInteger(value);
+                                    rootPage.earDetectionData.selected = selected;
+                                }
+                            }
+                            onPressedChanged: {
+                                if (!pressed) {
+                                    rootPage.setEarDetectionField("lowerVolume", rootPage.toInteger(value));
+                                }
+                            }
+                        }
+
+                        MP.Label {
+                            text: rootPage.volumeReductionLabel(earDetectionVolumeSlider.value)
+                        }
+                    }
+                }
+
+                MP.FormRow {
+                    Layout.fillWidth: true
+                    visible: rootPage.earDetectionData !== null
+                    label: qsTrId("battery.ear_detection.switch_to_speaker")
+
+                    QQC2.Switch {
+                        checked: rootPage.earDetectionData?.selected?.switchToSpeakers ?? false
+                        enabled: !(rootPage.earDetectionData?.readonly ?? true)
+                        onToggled: rootPage.setEarDetectionField("switchToSpeakers", checked)
+                    }
+                }
+
+                MP.FormRow {
+                    Layout.fillWidth: true
                     visible: rootPage.conversationAwarenessData !== null
                     label: qsTrId("battery.conversation_awareness")
 
                     QQC2.Switch {
-                        checked: rootPage.conversationAwarenessData?.selected ?? false
+                        checked: rootPage.conversationAwarenessData?.selected?.enabled ?? false
                         enabled: !(rootPage.conversationAwarenessData?.readonly ?? true)
-                        onToggled: {
-                            if (rootPage.conversationAwarenessData) {
-                                rootPage.conversationAwarenessData.selected = checked;
-                                cppBackend.setCapability("conversationAwareness", rootPage.currentAddress(), checked);
+                        onToggled: rootPage.setConversationAwarenessField("enabled", checked)
+                    }
+                }
+
+                MP.FormRow {
+                    Layout.fillWidth: true
+                    visible: rootPage.conversationAwarenessData !== null
+                    label: qsTrId("battery.conversation_awareness.lower_volume")
+
+                    RowLayout {
+                        spacing: MP.Units.largeSpacing
+
+                        QQC2.Slider {
+                            id: conversationAwarenessVolumeSlider
+                            Layout.leftMargin: -16
+                            Layout.rightMargin: -16
+                            implicitWidth: rootPage.mWidth + 32
+                            from: 0
+                            to: 100
+                            value: rootPage.conversationAwarenessData?.selected?.volume ?? 0
+                            enabled: !(rootPage.conversationAwarenessData?.readonly ?? true)
+                            onMoved: {
+                                if (rootPage.conversationAwarenessData) {
+                                    var selected = rootPage.conversationAwarenessData.selected || {};
+                                    selected.volume = rootPage.toInteger(value);
+                                    rootPage.conversationAwarenessData.selected = selected;
+                                }
                             }
+                            onPressedChanged: {
+                                if (!pressed) {
+                                    rootPage.setConversationAwarenessField("volume", rootPage.toInteger(value));
+                                }
+                            }
+                        }
+
+                        MP.Label {
+                            text: rootPage.volumeReductionLabel(conversationAwarenessVolumeSlider.value)
                         }
                     }
                 }
@@ -425,6 +644,109 @@ QQC2.Page {
                                 rootPage.personalizedVolumeData.selected = checked;
                                 cppBackend.setCapability("personalizedVolume", rootPage.currentAddress(), checked);
                             }
+                        }
+                    }
+                }
+
+                MP.FormRow {
+                    Layout.fillWidth: true
+                    visible: rootPage.digitalCrownData !== null
+                    label: qsTrId("battery.digital_crown")
+
+                    QQC2.ComboBox {
+                        width: rootPage.mWidth
+                        model: [qsTrId("battery.digital_crown.do_not_change"), qsTrId("battery.digital_crown.back_to_front"), qsTrId("battery.digital_crown.front_to_back")]
+                        currentIndex: {
+                            const value = rootPage.digitalCrownData?.selected;
+                            if (value === -1) return 0;
+                            if (value === 1) return 1;
+                            if (value === 2) return 2;
+                            return -1;
+                        }
+                        enabled: !(rootPage.digitalCrownData?.readonly ?? true)
+                        onActivated: {
+                            if (rootPage.digitalCrownData && currentIndex >= 0) {
+                                const nextValue = currentIndex === 0 ? -1 : currentIndex;
+                                rootPage.digitalCrownData.selected = nextValue;
+                                cppBackend.setCapability("digitalCrown", rootPage.currentAddress(), nextValue);
+                            }
+                        }
+                    }
+                }
+
+                MP.FormRow {
+                    Layout.fillWidth: true
+                    visible: rootPage.pressAndHoldAirPodModeData !== null
+                    label: qsTrId("battery.press_and_hold_mode.left")
+
+                    QQC2.ComboBox {
+                        width: rootPage.mWidth
+                        model: (rootPage.pressAndHoldAirPodModeData?.options ?? []).map(function (value) {
+                            return rootPage.pressAndHoldModeLabel(value);
+                        })
+                        currentIndex: {
+                            const options = rootPage.pressAndHoldAirPodModeData?.options ?? [];
+                            const selected = rootPage.pressAndHoldAirPodModeData?.selected?.left;
+                            return options.indexOf(selected);
+                        }
+                        enabled: !(rootPage.pressAndHoldAirPodModeData?.readonly ?? true)
+                        onActivated: {
+                            const options = rootPage.pressAndHoldAirPodModeData?.options ?? [];
+                            if (currentIndex >= 0 && currentIndex < options.length) {
+                                rootPage.setPressAndHoldMode("left", options[currentIndex]);
+                            }
+                        }
+                    }
+                }
+
+                MP.FormRow {
+                    Layout.fillWidth: true
+                    visible: rootPage.pressAndHoldAirPodModeData !== null
+                    label: qsTrId("battery.press_and_hold_mode.right")
+
+                    QQC2.ComboBox {
+                        width: rootPage.mWidth
+                        model: (rootPage.pressAndHoldAirPodModeData?.options ?? []).map(function (value) {
+                            return rootPage.pressAndHoldModeLabel(value);
+                        })
+                        currentIndex: {
+                            const options = rootPage.pressAndHoldAirPodModeData?.options ?? [];
+                            const selected = rootPage.pressAndHoldAirPodModeData?.selected?.right;
+                            return options.indexOf(selected);
+                        }
+                        enabled: !(rootPage.pressAndHoldAirPodModeData?.readonly ?? true)
+                        onActivated: {
+                            const options = rootPage.pressAndHoldAirPodModeData?.options ?? [];
+                            if (currentIndex >= 0 && currentIndex < options.length) {
+                                rootPage.setPressAndHoldMode("right", options[currentIndex]);
+                            }
+                        }
+                    }
+                }
+
+                MP.FormRow {
+                    Layout.fillWidth: true
+                    visible: rootPage.pressAndHoldAirPodModeAncData !== null
+                    label: qsTrId("battery.press_and_hold_anc")
+
+                    Components.MultiSelect {
+                        width: rootPage.mWidth
+                        title: qsTrId("battery.press_and_hold_anc")
+                        hint: qsTrId("battery.press_and_hold_anc.hint")
+                        doNotApplyLabel: qsTrId("battery.press_and_hold_anc.do_not_change")
+                        value: rootPage.pressAndHoldAirPodModeAncData?.selected ?? -1
+                        enabled: !(rootPage.pressAndHoldAirPodModeAncData?.readonly ?? true)
+                        options: [
+                            { value: 1, icon: rootPage.assetPath("icons/icon-off.svg"), label: qsTrId("battery.anc_off") },
+                            { value: 4, icon: rootPage.assetPath("icons/icon-tra.svg"), label: qsTrId("battery.anc_tra") },
+                            { value: 8, icon: rootPage.assetPath("icons/icon-adaptive.svg"), label: qsTrId("battery.anc_adaptive") },
+                            { value: 2, icon: rootPage.assetPath("icons/icon-noise.svg"), label: qsTrId("battery.anc_anc") }
+                        ].filter(function (option) {
+                            return ((rootPage.pressAndHoldAirPodModeAncData?.options ?? 0) & option.value) !== 0;
+                        })
+                        onValueCommitted: function (value) {
+                            rootPage.pressAndHoldAirPodModeAncData.selected = value;
+                            cppBackend.setCapability("pressAndHoldAirPodModeAnc", rootPage.currentAddress(), value);
                         }
                     }
                 }
@@ -479,18 +801,84 @@ QQC2.Page {
 
                 MP.FormRow {
                     Layout.fillWidth: true
-                    visible: rootPage.pressAndHoldDurationData !== null
-                    label: qsTrId("battery.press_and_hold_duration")
+                    visible: rootPage.ancOffModeData !== null
+                    label: qsTrId("battery.anc_off_mode")
 
                     QQC2.ComboBox {
                         width: rootPage.mWidth
-                        model: [qsTrId("battery.press_and_hold_duration.default"), qsTrId("battery.press_and_hold_duration.shorter"), qsTrId("battery.press_and_hold_duration.shortest")]
-                        currentIndex: rootPage.pressAndHoldDurationData?.selected ?? 0
-                        enabled: !(rootPage.pressAndHoldDurationData?.readonly ?? true)
+                        model: [qsTrId("battery.anc_off_mode.do_not_change"), qsTrId("battery.anc_off_mode.enabled"), qsTrId("battery.anc_off_mode.disabled")]
+                        currentIndex: {
+                            const value = rootPage.ancOffModeData?.selected;
+                            if (value === -1) return 0;
+                            if (value === 1) return 1;
+                            if (value === 2) return 2;
+                            return -1;
+                        }
+                        enabled: !(rootPage.ancOffModeData?.readonly ?? true)
                         onActivated: {
-                            if (rootPage.pressAndHoldDurationData) {
-                                rootPage.pressAndHoldDurationData.selected = currentIndex;
-                                cppBackend.setCapability("pressAndHoldDuration", rootPage.currentAddress(), currentIndex);
+                            if (rootPage.ancOffModeData && currentIndex >= 0) {
+                                const nextValue = currentIndex === 0 ? -1 : currentIndex;
+                                rootPage.ancOffModeData.selected = nextValue;
+                                cppBackend.setCapability("ancOffMode", rootPage.currentAddress(), nextValue);
+                            }
+                        }
+                    }
+                }
+
+                MP.FormRow {
+                    Layout.fillWidth: true
+                    visible: rootPage.customEqData !== null
+                    label: qsTrId("battery.custom_eq")
+
+                    QQC2.Switch {
+                        id: customEqSwitch
+                        checked: rootPage.customEqData?.selected?.enabled ?? false
+                        enabled: !(rootPage.customEqData?.readonly ?? true)
+                        onToggled: {
+                            if (rootPage.customEqData) {
+                                rootPage.setCustomEqField("enabled", checked);
+                                rootPage.sendCustomEq();
+                            }
+                        }
+                    }
+                }
+
+                Repeater {
+                    model: [
+                        { field: "low", label: qsTrId("battery.custom_eq.low") },
+                        { field: "mid", label: qsTrId("battery.custom_eq.mid") },
+                        { field: "high", label: qsTrId("battery.custom_eq.high") }
+                    ]
+
+                    delegate: MP.FormRow {
+                        Layout.fillWidth: true
+                        visible: rootPage.customEqData !== null
+                        label: modelData.label
+
+                        RowLayout {
+                            spacing: MP.Units.largeSpacing
+
+                            QQC2.Slider {
+                                id: customEqSlider
+                                Layout.leftMargin: -16
+                                Layout.rightMargin: -16
+                                implicitWidth: rootPage.mWidth + 32
+                                from: 0
+                                to: 100
+                                value: rootPage.customEqValue(modelData.field)
+                                enabled: !(rootPage.customEqData?.readonly ?? true)
+                                         && customEqSwitch.checked
+                                onMoved: rootPage.setCustomEqField(modelData.field, Math.round(value))
+                                onPressedChanged: {
+                                    if (!pressed && rootPage.customEqData) {
+                                        rootPage.setCustomEqField(modelData.field, Math.round(value));
+                                        rootPage.sendCustomEq();
+                                    }
+                                }
+                            }
+
+                            MP.Label {
+                                text: Math.round(customEqSlider.value) + "%"
                             }
                         }
                     }
@@ -517,35 +905,19 @@ QQC2.Page {
 
                 MP.FormRow {
                     Layout.fillWidth: true
-                    visible: rootPage.toneVolumeData !== null
-                    label: qsTrId("battery.tone_volume")
+                    visible: rootPage.pressAndHoldDurationData !== null
+                    label: qsTrId("battery.press_and_hold_duration")
 
-                    RowLayout {
-                        spacing: MP.Units.largeSpacing
-
-                        QQC2.Slider {
-                            id: toneVolumeSlider
-                            Layout.leftMargin: -16
-                            Layout.rightMargin: -16
-                            implicitWidth: rootPage.mWidth + 32
-                            from: 15
-                            to: 125
-                            value: rootPage.toneVolumeData?.selected ?? 50
-                            enabled: !(rootPage.toneVolumeData?.readonly ?? true)
-                            onMoved: {
-                                if (rootPage.toneVolumeData) {
-                                    rootPage.toneVolumeData.selected = Math.round(value);
-                                }
+                    QQC2.ComboBox {
+                        width: rootPage.mWidth
+                        model: [qsTrId("battery.press_and_hold_duration.default"), qsTrId("battery.press_and_hold_duration.shorter"), qsTrId("battery.press_and_hold_duration.shortest")]
+                        currentIndex: rootPage.pressAndHoldDurationData?.selected ?? 0
+                        enabled: !(rootPage.pressAndHoldDurationData?.readonly ?? true)
+                        onActivated: {
+                            if (rootPage.pressAndHoldDurationData) {
+                                rootPage.pressAndHoldDurationData.selected = currentIndex;
+                                cppBackend.setCapability("pressAndHoldDuration", rootPage.currentAddress(), currentIndex);
                             }
-                            onPressedChanged: {
-                                if (!pressed && rootPage.toneVolumeData) {
-                                    cppBackend.setCapability("toneVolume", rootPage.currentAddress(), rootPage.toneVolumeData.selected);
-                                }
-                            }
-                        }
-
-                        MP.Label {
-                            text: Math.round(toneVolumeSlider.value) + "%"
                         }
                     }
                 }
@@ -616,6 +988,77 @@ QQC2.Page {
                         model: [qsTrId("battery.end_call.twice"), qsTrId("battery.end_call.once")]
                         currentIndex: (rootPage.endCallData?.selected === 2) ? 1 : 0
                         enabled: false
+                    }
+                }
+
+                MP.FormRow {
+                    Layout.fillWidth: true
+                    visible: rootPage.toneVolumeData !== null
+                    label: qsTrId("battery.tone_volume")
+
+                    RowLayout {
+                        spacing: MP.Units.largeSpacing
+
+                        QQC2.Slider {
+                            id: toneVolumeSlider
+                            Layout.leftMargin: -16
+                            Layout.rightMargin: -16
+                            implicitWidth: rootPage.mWidth + 32
+                            from: 15
+                            to: 125
+                            value: rootPage.toneVolumeData?.selected ?? 50
+                            enabled: !(rootPage.toneVolumeData?.readonly ?? true)
+                            onMoved: {
+                                if (rootPage.toneVolumeData) {
+                                    rootPage.toneVolumeData.selected = rootPage.toInteger(value);
+                                }
+                            }
+                            onPressedChanged: {
+                                if (!pressed && rootPage.toneVolumeData) {
+                                    const selectedValue = rootPage.toInteger(rootPage.toneVolumeData.selected);
+                                    rootPage.toneVolumeData.selected = selectedValue;
+                                    cppBackend.setCapability("toneVolume", rootPage.currentAddress(), selectedValue);
+                                }
+                            }
+                        }
+
+                        MP.Label {
+                            text: Math.round(toneVolumeSlider.value) + "%"
+                        }
+                    }
+                }
+
+                MP.FormRow {
+                    Layout.fillWidth: true
+                    visible: rootPage.sleepDetectionData !== null
+                    label: qsTrId("battery.sleep_detection")
+
+                    QQC2.Switch {
+                        checked: rootPage.sleepDetectionData?.selected ?? false
+                        enabled: !(rootPage.sleepDetectionData?.readonly ?? true)
+                        onToggled: {
+                            if (rootPage.sleepDetectionData) {
+                                rootPage.sleepDetectionData.selected = checked;
+                                cppBackend.setCapability("sleepDetection", rootPage.currentAddress(), checked);
+                            }
+                        }
+                    }
+                }
+
+                MP.FormRow {
+                    Layout.fillWidth: true
+                    visible: rootPage.optimizedChargeData !== null
+                    label: qsTrId("battery.optimized_charge")
+
+                    QQC2.Switch {
+                        checked: rootPage.optimizedChargeData?.selected ?? false
+                        enabled: !(rootPage.optimizedChargeData?.readonly ?? true)
+                        onToggled: {
+                            if (rootPage.optimizedChargeData) {
+                                rootPage.optimizedChargeData.selected = checked;
+                                cppBackend.setCapability("optimizedCharge", rootPage.currentAddress(), checked);
+                            }
+                        }
                     }
                 }
             }

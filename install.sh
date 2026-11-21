@@ -26,13 +26,13 @@ done
 if [[ $SYSTEM -eq 1 ]]; then
   INSTALL_DIR="/opt/magicpods"
   BIN_LINK="/usr/local/bin/magicpods"
-  DESKTOP_DEST="/usr/share/applications/magicpods.desktop"
+  DESKTOP_DEST="/usr/share/applications/app.magicpods.desktop"
   ICON_DEST="/usr/share/icons/hicolor"
   run() { sudo "$@"; }
 else
   INSTALL_DIR="$HOME/.local/share/magicpods"
   BIN_LINK="$HOME/.local/bin/magicpods"
-  DESKTOP_DEST="$HOME/.local/share/applications/magicpods.desktop"
+  DESKTOP_DEST="$HOME/.local/share/applications/app.magicpods.desktop"
   ICON_DEST="$HOME/.local/share/icons/hicolor"
   run() { "$@"; }
 fi
@@ -74,6 +74,7 @@ tmp="$(mktemp)"
 write_desktop "$tmp"
 run install -Dm644 "$tmp" "$DESKTOP_DEST"
 rm -f "$tmp"
+run rm -f "$(dirname "$DESKTOP_DEST")/magicpods.desktop" # name used by older installs
 
 if [[ -d "$BUNDLE_DIR/share/icons/hicolor" ]]; then
   echo "==> Installing icons to $ICON_DEST"
@@ -84,10 +85,17 @@ if [[ -d "$BUNDLE_DIR/share/icons/hicolor" ]]; then
   fi
 fi
 
+# Older installs wrote magicpods.desktop with a flag that no longer exists:
+# migrate it instead of leaving a launcher that opens the window at login.
+[[ -f "$HOME/.config/autostart/magicpods.desktop" ]] && AUTOSTART=1
+
 if [[ $AUTOSTART -eq 1 ]]; then
-  AUTOSTART_FILE="$HOME/.config/autostart/magicpods.desktop"
+  # Same name the app's own autostart switch (Settings) uses, so both control one file.
+  AUTOSTART_FILE="$HOME/.config/autostart/app.magicpods.desktop"
   mkdir -p "$(dirname "$AUTOSTART_FILE")"
-  write_desktop "$AUTOSTART_FILE" --start-in-tray
+  write_desktop "$AUTOSTART_FILE" --background
+  # Older installs wrote magicpods.desktop; keeping it would start the app twice.
+  rm -f "$HOME/.config/autostart/magicpods.desktop"
   echo "==> Created autostart entry: $AUTOSTART_FILE"
 fi
 

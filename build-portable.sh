@@ -71,18 +71,20 @@ echo "==> Building MagicPodsCore runtime with Docker"
   "$SCRIPT_DIR"
 
 echo "==> Copying MagicPodsCore runtime into $TARGET_DIR"
-mkdir -p "$TARGET_DIR/bin/modules" "$TARGET_DIR/bin/modules/lib"
+mkdir -p "$TARGET_DIR/bin/modules"
 
 if [[ ! -f "$DOCKER_OUT/bin/modules/magicpodscore" ]]; then
   echo "ERROR: $DOCKER_OUT/bin/modules/magicpodscore not found" >&2
   exit 1
 fi
 
-cp -f "$DOCKER_OUT/bin/modules/magicpodscore" "$TARGET_DIR/bin/modules/magicpodscore"
-
-if [[ -d "$DOCKER_OUT/lib" ]]; then
-  cp -a "$DOCKER_OUT/lib/." "$TARGET_DIR/bin/modules/lib/"
+if [[ ! -f "$DOCKER_OUT/bin/modules/lib/libavcodec.so.58" \
+   || ! -f "$DOCKER_OUT/bin/modules/lib/libavutil.so.56" ]]; then
+  echo "ERROR: bundled FFmpeg libraries not found in $DOCKER_OUT/bin/modules/lib" >&2
+  exit 1
 fi
+
+cp -a "$DOCKER_OUT/bin/modules/." "$TARGET_DIR/bin/modules/"
 
 # Files exported by "sudo docker" are root-owned; hand them back to the user.
 [[ "${DOCKER[0]}" == sudo ]] && sudo chown -R "$(id -u):$(id -g)" "$TARGET_DIR"

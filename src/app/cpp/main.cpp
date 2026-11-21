@@ -4,8 +4,6 @@
 
 #include <QApplication>
 #include <QQmlApplicationEngine>
-#include <QTranslator>
-#include <QLocale>
 #include <QIcon>
 #include <QLibraryInfo>
 #include <QQmlContext>
@@ -18,16 +16,68 @@
 #include <QQmlComponent>
 #include <QQuickStyle>
 #include <QScopedPointer>
+#include <QSettings>
+#include <QStyleHints>
+#include <QStringList>
 #include <QWindow>
 
 #include "BackendManager.h"
 #include "DesktopManager.h"
 #include "DeckyManager.h"
+#include "GlobalShortcutManager.h"
+#include "LanguageManager.h"
+#include "ShortcutActionManager.h"
 #include "TrayIcon.h"
 #include "TrayIconManager.h"
+#include "UiSettingsService.h"
 #include "Backend.h"
 
+namespace {
+const QString GameModeScaleSettingKey = QStringLiteral("GameMode/scale");
+const QString DefaultGameModeScale = QStringLiteral("1.5");
+const QString ApplicationThemeSettingKey = QStringLiteral("Theme/application");
+
+void applyApplicationTheme(const QString &theme)
+{
+    Qt::ColorScheme colorScheme = Qt::ColorScheme::Unknown;
+    if (theme == QStringLiteral("light"))
+        colorScheme = Qt::ColorScheme::Light;
+    else if (theme == QStringLiteral("dark"))
+        colorScheme = Qt::ColorScheme::Dark;
+
+    QGuiApplication::styleHints()->setColorScheme(colorScheme);
+}
+
+void applyGameModeScale()
+{
+    if (qEnvironmentVariableIsEmpty("GAMESCOPE_WAYLAND_DISPLAY")
+        || !qEnvironmentVariableIsEmpty("QT_SCALE_FACTOR")) {
+        return;
+    }
+
+    QSettings settings(QSettings::IniFormat,
+                       QSettings::UserScope,
+                       QStringLiteral("magicpods"),
+                       QStringLiteral("ui"));
+    const QString scale = settings.value(GameModeScaleSettingKey, DefaultGameModeScale).toString();
+    if (scale == QStringLiteral("off"))
+        return;
+
+    const QStringList supportedScales{
+        QStringLiteral("1.0"),
+        QStringLiteral("1.25"),
+        QStringLiteral("1.5"),
+        QStringLiteral("1.75"),
+        QStringLiteral("2.0")
+    };
+    qputenv("QT_SCALE_FACTOR",
+            (supportedScales.contains(scale) ? scale : DefaultGameModeScale).toUtf8());
+}
+} // namespace
+
 static void ensureEnvDefaults() {
+    applyGameModeScale();
+
     if (qEnvironmentVariableIsEmpty("QML2_IMPORT_PATH")) {
         const QString qmlPath = QLibraryInfo::path(QLibraryInfo::QmlImportsPath);
         if (!qmlPath.isEmpty()) {
@@ -52,17 +102,6 @@ int main(int argc, char *argv[]) {
 
     QApplication app(argc, argv);
 
-    // Parse a simple CLI flag to start the application directly in the tray
-    // Supported flags: --start-in-tray, --start-minimized, --minimized
-    bool startInTray = false;
-    const QStringList cliArgs = QCoreApplication::arguments();
-    for (const QString &a : cliArgs) {
-        if (a == QLatin1String("--start-in-tray") || a == QLatin1String("--start-minimized") || a == QLatin1String("--minimized")) {
-            startInTray = true;
-            break;
-        }
-    }
-
     QFontDatabase::addApplicationFont(":/fonts/NotoSans-Thin.ttf");
     QFontDatabase::addApplicationFont(":/fonts/NotoSans-ThinItalic.ttf");
     QFontDatabase::addApplicationFont(":/fonts/NotoSans-ExtraLight.ttf");
@@ -83,6 +122,8 @@ int main(int argc, char *argv[]) {
     QFontDatabase::addApplicationFont(":/fonts/NotoSans-BlackItalic.ttf");
     app.setFont(QFont("Noto Sans", app.font().pointSize()));
 
+    // TODO: Package with Qt 6.11.1 or newer for QTBUG-145740, which prevents
+    // FluentWinUI3 from drawing keyboard focus frames for programmatic focus.
     QQuickStyle::setStyle("FluentWinUI3");
     app.setApplicationName("MagicPods");
     app.setApplicationDisplayName("MagicPods");
@@ -92,14 +133,18 @@ int main(int argc, char *argv[]) {
     app.setDesktopFileName("app.magicpods");
     app.setQuitOnLastWindowClosed(false);
 
+    const bool startInBackground = app.arguments().contains(QStringLiteral("--background"));
+
     const QString serverName = QString("magicpods_%1_%2")
                                    .arg(app.organizationDomain(), app.applicationName());
     QLocalSocket socket;
     socket.connectToServer(serverName);
     if (socket.waitForConnected(150)) {
-        socket.write("raise");
-        socket.flush();
-        socket.waitForBytesWritten(150);
+        if (!startInBackground) {
+            socket.write("raise");
+            socket.flush();
+            socket.waitForBytesWritten(150);
+        }
         return 0;
     }
 
@@ -124,6 +169,15 @@ int main(int argc, char *argv[]) {
             root->setProperty("visible", true);
         }
     };
+    auto toggleMainWindow = [&]() {
+        if (!root)
+            return;
+
+        if (root->property("visible").toBool())
+            root->setProperty("visible", false);
+        else
+            raiseWindow();
+    };
     auto handleRaiseRequest = [&]() {
         auto client = server.nextPendingConnection();
         if (client) {
@@ -147,36 +201,68 @@ int main(int argc, char *argv[]) {
     appIcon.addFile(QStringLiteral(":/qt/qml/magicpods/src/app/qml/assets/images/logo-512.png"), QSize(512, 512));
     app.setWindowIcon(appIcon);
 
-    QTranslator englishTranslation;
-    const QString englishTranslationPath = QStringLiteral(":/i18n/locale_en.qm");
-    if (!englishTranslation.load(englishTranslationPath)) {
-        qFatal("Could not load %s!", qUtf8Printable(englishTranslationPath));
-    }
-    app.installTranslator(&englishTranslation);
+    UiSettingsService uiSettings;
+    const QString applicationTheme = uiSettings
+                                         .value(ApplicationThemeSettingKey,
+                                                QStringLiteral("system"))
+                                         .toString();
+    applyApplicationTheme(applicationTheme);
+    QObject::connect(&uiSettings,
+                     &UiSettingsService::valueChanged,
+                     &app,
+                     [](const QString &key, const QVariant &value) {
+                         if (key == ApplicationThemeSettingKey)
+                             applyApplicationTheme(value.toString());
+                     });
 
-    QTranslator localizedTranslation;
-    if (QLocale().language() != QLocale::English
-        && localizedTranslation.load(QLocale(),
-                                     QStringLiteral("locale"),
-                                     QStringLiteral("_"),
-                                     QStringLiteral(":/i18n/"))) {
-        app.installTranslator(&localizedTranslation);
-    }
+    LanguageManager languageManager(&uiSettings);
+    languageManager.installTranslators();
 
     const bool gameScopeMode = !qEnvironmentVariableIsEmpty("GAMESCOPE_WAYLAND_DISPLAY");
 
-    QQmlApplicationEngine engine;
     BackendManager backendManager;
     DesktopManager desktopManager;
     DeckyManager deckyManager;
+    GlobalShortcutManager globalShortcutManager(gameScopeMode,
+                                                 desktopManager.isInstalled());
     Backend backend;
+    ShortcutActionManager shortcutActionManager(&backend,
+                                                 &uiSettings,
+                                                 toggleMainWindow);
+    QObject::connect(&globalShortcutManager,
+                     &GlobalShortcutManager::shortcutActivated,
+                     &shortcutActionManager,
+                     &ShortcutActionManager::executeShortcut);
+    QObject::connect(&languageManager,
+                     &LanguageManager::languageChanged,
+                     &shortcutActionManager,
+                     &ShortcutActionManager::refreshTranslations);
     TrayIcon trayIcon;
+    const QString trayIconThemeKey = QStringLiteral("Theme/tray_icon");
+    const QString trayIconTheme = uiSettings
+                                      .value(trayIconThemeKey, QStringLiteral("auto"))
+                                      .toString();
+    if (trayIconTheme == QStringLiteral("light"))
+        trayIcon.setThemeMode(1);
+    else if (trayIconTheme == QStringLiteral("dark"))
+        trayIcon.setThemeMode(2);
+    else
+        trayIcon.setThemeMode(0);
+
+    QQmlApplicationEngine engine;
+    languageManager.setEngine(&engine);
     engine.rootContext()->setContextProperty("backendManager", &backendManager);
     engine.rootContext()->setContextProperty("desktopManager", &desktopManager);
     engine.rootContext()->setContextProperty("deckyManager", &deckyManager);
+    engine.rootContext()->setContextProperty("globalShortcutManager", &globalShortcutManager);
+    engine.rootContext()->setContextProperty("shortcutActionManager", &shortcutActionManager);
     engine.rootContext()->setContextProperty("cppBackend", &backend);
     engine.rootContext()->setContextProperty("cppTrayIcon", &trayIcon);
+    engine.rootContext()->setContextProperty("uiSettings", &uiSettings);
+    engine.rootContext()->setContextProperty("languageManager", &languageManager);
     engine.rootContext()->setContextProperty("gameScopeMode", gameScopeMode);
+    engine.rootContext()->setContextProperty("startInBackground", startInBackground);
+    globalShortcutManager.start();
     backendManager.start();
     backend.connectSocket();
     engine.loadFromModule("magicpods", "Main");
@@ -200,42 +286,24 @@ int main(int argc, char *argv[]) {
 
     root = engine.rootObjects().constFirst();
 
-    // If requested to start in tray, do not show the main window on startup.
-    // Without a tray the window would be unreachable, so keep it visible then.
-    if (startInTray && QSystemTrayIcon::isSystemTrayAvailable()) {
-        if (auto window = qobject_cast<QWindow *>(root)) {
-            window->hide();
-        } else {
-            root->setProperty("visible", false);
-        }
+    if (raisePending) {
+        raiseWindow();
     }
 
-    if (raisePending && !startInTray) {
+    // Local patch: --background hides the window via Main.qml. Without a tray
+    // it would be unreachable, so show it anyway.
+    if (startInBackground && !QSystemTrayIcon::isSystemTrayAvailable()) {
         raiseWindow();
     }
 
     QMenu trayMenu;
-    auto toggleMainWindow = [&]() {
-        if (!root) {
-            return;
-        }
-        if (auto window = qobject_cast<QWindow *>(root)) {
-            const bool visible = window->isVisible();
-            if (visible) {
-                window->hide();
-            } else {
-                window->show();
-                window->raise();
-                window->requestActivate();
-            }
-        } else {
-            const bool visible = root->property("visible").toBool();
-            root->setProperty("visible", !visible);
-        }
-    };
     TrayIconManager trayIconManager(&trayIcon, &trayMenu, &backend, toggleMainWindow, [&app]() {
         app.quit();
     });
+    QObject::connect(&languageManager,
+                     &LanguageManager::languageChanged,
+                     &trayIconManager,
+                     &TrayIconManager::retranslate);
 
     if (QSystemTrayIcon::isSystemTrayAvailable()) {
         trayIcon.setContextMenu(&trayMenu);

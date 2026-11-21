@@ -84,6 +84,12 @@ TrayIconManager::TrayIconManager(TrayIcon *trayIcon,
     rebuildMenu();
 }
 
+void TrayIconManager::retranslate()
+{
+    updateTrayIcon();
+    rebuildMenu();
+}
+
 void TrayIconManager::handleDataReceived(const QVariant &json)
 {
     updateState(json.toMap());
@@ -149,16 +155,26 @@ void TrayIconManager::rebuildMenu()
             hasDynamicItems = true;
 
             const QString address = headphone.value(QStringLiteral("address")).toString();
+            const QVariantMap microphoneData = highResolutionMicrophoneDataForAddress(address);
             const QVariantMap ancData = ancDataForAddress(address);
-            if (!ancData.isEmpty()) {
+            if (!microphoneData.isEmpty() || !ancData.isEmpty()) {
                 menu->addSeparator();
-                addAncActions(address, ancData);
+                if (!microphoneData.isEmpty()) {
+                    addHighResolutionMicrophoneAction(address, microphoneData);
+                    if (!ancData.isEmpty()) {
+                        menu->addSeparator();
+                    }
+                }
+                if (!ancData.isEmpty()) {
+                    addAncActions(address, ancData);
+                }
                 menu->addSeparator();
             }
         }
     }
 
-    if (hasDynamicItems) {
+    const QList<QAction *> actions = menu->actions();
+    if (hasDynamicItems && !actions.isEmpty() && !actions.constLast()->isSeparator()) {
         menu->addSeparator();
     }
 
@@ -287,6 +303,18 @@ QVariantMap TrayIconManager::ancDataForAddress(const QString &address) const
     return infoData.value(QStringLiteral("capabilities")).toMap().value(QStringLiteral("anc")).toMap();
 }
 
+QVariantMap TrayIconManager::highResolutionMicrophoneDataForAddress(const QString &address) const
+{
+    if (address.isEmpty() || infoData.value(QStringLiteral("address")).toString() != address) {
+        return {};
+    }
+
+    return infoData.value(QStringLiteral("capabilities"))
+        .toMap()
+        .value(QStringLiteral("highResolutionMicrophone"))
+        .toMap();
+}
+
 void TrayIconManager::addHeadphoneAction(const QVariantMap &headphone)
 {
     const QString address = headphone.value(QStringLiteral("address")).toString();
@@ -306,6 +334,23 @@ void TrayIconManager::addHeadphoneAction(const QVariantMap &headphone)
         } else {
             backend->connectDevice(address);
         }
+    });
+}
+
+void TrayIconManager::addHighResolutionMicrophoneAction(const QString &address,
+                                                        const QVariantMap &microphoneData)
+{
+    QAction *action = menu->addAction(qtTrId("tray.high_resolution_microphone"));
+
+    const bool isSelected = microphoneData.value(QStringLiteral("selected")).toBool();
+    const bool isReadonly = microphoneData.value(QStringLiteral("readonly")).toBool();
+    action->setEnabled(!isReadonly);
+    if (isSelected) {
+        action->setIcon(iconFromAppAssets(QStringLiteral("icon-mic.svg")));
+    }
+
+    connect(action, &QAction::triggered, this, [this, address, isSelected]() {
+        backend->setCapability(QStringLiteral("highResolutionMicrophone"), address, !isSelected);
     });
 }
 
