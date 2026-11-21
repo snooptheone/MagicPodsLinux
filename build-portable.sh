@@ -41,7 +41,11 @@ echo "==> Preparing build directory: $BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 
 echo "==> Configuring project (Release)"
-cmake -S "$SCRIPT_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release
+# Build with the same Qt that cqtdeployer bundles ($QMAKE). Otherwise cmake picks
+# the system Qt and the binary needs newer symbols than the bundled libs have.
+# -U drops Qt paths cached by an earlier configure against another Qt.
+cmake -S "$SCRIPT_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_PREFIX_PATH="$("$QMAKE" -query QT_INSTALL_PREFIX)" -U 'Qt6*_DIR'
 
 echo "==> Building project"
 cmake --build "$BUILD_DIR" --config Release --parallel "$(nproc)"
